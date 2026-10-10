@@ -1,0 +1,55 @@
+[project]
+name = "prediction-market-lab"
+version = "0.1.0"
+description = "Polymarket analytics: anomaly detection, liquidity-reward math, paper trading, opt-in live market making"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx==0.28.1",
+    "pydantic==2.14.0",
+]
+
+[project.optional-dependencies]
+# Live trading signs orders with a wallet key: kept out of the default install.
+live = ["py-clob-client==0.34.6"]
+
+[project.scripts]
+pmlab = "pmlab.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "hypothesis==6.168.5",
+    "ruff==0.17.0",
+    "mypy==2.4.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pmlab"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S311"]  # seeded random for synthetic market data
+
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live_api: hits the real public Polymarket APIs (scheduled CI only)"]
+addopts = "-m 'not live_api'"

@@ -113,18 +113,26 @@ def telegram(text: str) -> None:
 def cmd_watch(c: Client, a: argparse.Namespace) -> None:
     """Poll the top markets; alert on per-interval volume far above their own baseline."""
     series: dict[str, list[float]] = {}
-    names: dict[str, str] = {}
-    for _ in range(a.rounds):
-        for m in c.markets(limit=a.limit, order="volume24hr", ascending="false"):
-            s = series.setdefault(m.id, [])
+    last_seen: dict[str, int] = {}
+    for rnd in range(a.rounds):
+        try:
+            markets = c.markets(limit=a.limit, order="volume24hr", ascending="false")
+        except httpx.HTTPError as e:  # one bad poll must not end a long watch
+            print(f"poll failed ({type(e).__name__}), retrying next round", file=sys.stderr)
+            time.sleep(a.every)
+            continue
+        for m in markets:
+            if last_seen.get(m.id) != rnd - 1:
+                series[m.id] = []  # first sight or a gap: an increment spanning a gap isn't a spike
+            last_seen[m.id] = rnd
+            s = series[m.id]
             s.append(m.volume)
-            names[m.id] = m.question
             spikes = anomaly.volume_spikes(
                 s, window=a.window, threshold=a.threshold, min_increment=a.min_volume
             )
             if spikes and spikes[-1].index == len(s) - 1:
                 msg = (
-                    f"volume spike: {names[m.id][:80]}\n"
+                    f"volume spike: {m.question[:80]}\n"
                     f"${spikes[-1].value:,.0f} in the last interval (z={spikes[-1].score:.1f})"
                 )
                 print(msg, flush=True)
@@ -136,23 +144,25 @@ def cmd_record(c: Client, a: argparse.Namespace) -> None:
     m = c.market(a.condition)
     if m is None or not m.is_binary:
         raise SystemExit("need a binary market condition id")
+    saved = 0
     with Path(a.out).open("a") as f:
         for i in range(a.count):
-            yes, no = c.book(m.token_ids[0]), c.book(m.token_ids[1])
-            f.write(
-                json.dumps(
-                    {
-                        "t": time.time(),
-                        "yes": yes.model_dump(by_alias=True),
-                        "no": no.model_dump(by_alias=True),
-                    }
-                )
-                + "\n"
-            )
-            f.flush()
+            try:
+                yes, no = c.book(m.token_ids[0]), c.book(m.token_ids[1])
+            except httpx.HTTPError as e:  # skip a snapshot, don't lose the recording
+                print(f"snapshot {i} skipped ({type(e).__name__})", file=sys.stderr)
+            else:
+                row = {
+                    "t": time.time(),
+                    "yes": yes.model_dump(by_alias=True),
+                    "no": no.model_dump(by_alias=True),
+                }
+                f.write(json.dumps(row) + "\n")
+                f.flush()
+                saved += 1
             if i < a.count - 1:
                 time.sleep(a.every)
-    print(f"recorded {a.count} snapshots of {m.question[:60]} -> {a.out}")
+    print(f"recorded {saved}/{a.count} snapshots of {m.question[:60]} -> {a.out}")
 
 
 def cmd_paper(c: Client, a: argparse.Namespace) -> None:
@@ -167,14 +177,21 @@ def cmd_paper(c: Client, a: argparse.Namespace) -> None:
         aggressiveness=a.aggressiveness,
         max_inventory=a.max_inventory,
     )
-    hours = (snaps[-1].t - snaps[0].t) / 3600
+    minutes = (snaps[-1].t - snaps[0].t) / 60
+    size = max(a.size, reward.min_size)
+    avg_share = sum(r.shares) / len(r.shares) if r.shares else 0.0
+    per_day = r.rewards / minutes * 1440 if minutes else 0.0
     print(
-        f"{len(snaps)} snapshots over {hours:.1f} h | fills {len(r.fills)} | "
-        f"inventory YES {r.inventory_yes:.0f} NO {r.inventory_no:.0f}"
+        f"{len(snaps)} snapshots over {minutes:.0f} min | {size:.0f} shares per side | "
+        f"pool ${reward.daily_rate:,.0f}/day"
     )
     print(
-        f"est. rewards ${r.rewards:.2f} | mark-to-market ${r.mark_to_market:.2f} | "
-        f"total ${r.total:.2f}  (crude fill model, see paper.py)"
+        f"avg reward share {avg_share:.4%} | est. rewards ${r.rewards:.4f} "
+        f"(~${per_day:.2f}/day at this share)"
+    )
+    print(
+        f"fills {len(r.fills)} | inventory YES {r.inventory_yes:.0f} NO {r.inventory_no:.0f} | "
+        f"mark-to-market ${r.mark_to_market:.2f}  (crude fill model, see paper.py)"
     )
 
 

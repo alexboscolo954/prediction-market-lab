@@ -73,7 +73,21 @@ est $/day  share  capital pool/day spread min sz   mid  question
 
 ### Paper trading
 
-PAPER_PLACEHOLDER
+[`examples/balance-of-power.jsonl`](examples/balance-of-power.jsonl) holds 14 real order-book snapshots, 30 s apart, of "2026 Balance of Power: D Senate, D House" (pool $1,331/day, 4.5¢ max spread, 200-share minimum). `pmlab paper` replays them through the same planner as live mode:
+
+```
+$ pmlab paper examples/balance-of-power.jsonl --condition 0x16c63b7c... --size 200
+14 snapshots over 7 min | 200 shares per side | pool $1,331/day
+avg reward share 0.0039% | est. rewards $0.0002 (~$0.05/day at this share)
+
+$ pmlab paper examples/balance-of-power.jsonl --condition 0x16c63b7c... --size 20000
+14 snapshots over 7 min | 20000 shares per side | pool $1,331/day
+avg reward share 0.3910% | est. rewards $0.0238 (~$5.20/day at this share)
+```
+
+The book on this market holds **millions of shares within a cent of the midpoint** (2.1M at 0.60, 666k at 0.61). About $19,000 of bids earns about $5 a day *before* adverse selection, and a minimum-size quote earns pennies. Reward farming on deep markets is a scale business, and the simulator makes that visible in seconds. No fills happened in these 7 minutes.
+
+The fill model is crude: a bid fills when a later snapshot's best ask trades down to it. Queue position and trades between snapshots are ignored. Read the numbers as mechanics, not returns.
 
 ### Live mode (opt-in)
 
@@ -92,7 +106,7 @@ Live mode isn't exercised against the real exchange in CI. Check Polymarket's te
 
 ## Testing
 
-- **Unit (39 tests):** API parsing against **recorded real responses**, reward math against the docs, quoting invariants as property tests, anomaly detectors on synthetic series, the paper trader, and every live-mode fence.
+- **Unit (41 tests):** API parsing against **recorded real responses**, reward math against the docs, quoting invariants as property tests, anomaly detectors on synthetic series, the paper trader, every live-mode fence, and recorder/watcher resilience: a DNS blip killed the first real recording halfway, and now a failed poll is skipped.
 - **A weekly contract test against the live API.** Both of this project's earlier versions broke silently when Polymarket's responses didn't match the code: `clobTokenIds`, `outcomes` and `outcomePrices` arrive as JSON *strings*, and outcomes aren't always Yes/No. Now a schema change turns the build red instead. Its first run found reward programs that are placeholders (0 spread, $0.001/day), which the client now filters out.
 
 ## What changed from the first versions

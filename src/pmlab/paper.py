@@ -34,6 +34,7 @@ class PaperResult:
         default_factory=list
     )  # t, outcome, px, size
     last_mid: float = 0.5
+    shares: list[float] = field(default_factory=list)  # reward share per interval
 
     @property
     def mark_to_market(self) -> float:
@@ -101,6 +102,7 @@ def run(
         )
         minutes = max(0.0, (cur.t - prev.t) / 60)
         r.rewards += share * reward.daily_rate / 1440 * minutes
+        r.shares.append(share)
     return r
 
 
